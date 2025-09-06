@@ -82,7 +82,7 @@ function love.load(args)
 
     Os = love.system.getOS()
 
-    love.window.setMode(1280, 720, {resizable = true})
+    love.window.setMode(1280, 1024, {resizable = true})
     --love.window.maximize()
     ResizeWindows()
     --LoadImage()
@@ -195,15 +195,67 @@ function love.update(dt)
         Slab.Text(CurrentFileName)
     end
 
-    if PreviewImage then
-        Slab.Text("Size: (" .. math.floor(ImageDataSize.Width * CurrentScale) .. "x" ..  math.floor(ImageDataSize.Height * CurrentScale) .. ")")
-        if Slab.Input('CurrentScale', {W = ToolbarElementWidth, Text = CurrentScale, NumbersOnly = true, MinNumber = 0.01, MaxNumber = 1.0, Precision = 2, UseSlider = true}) then
-            CurrentScale = Slab.GetInputNumber()
+if PreviewImage then
+    -- Validate ImageDataSize
+    if not ImageDataSize or ImageDataSize.Width <= 0 or ImageDataSize.Height <= 0 then
+        Slab.Text("Error: Invalid ImageDataSize")
+        return
+    end
+
+    -- Calculate current dimensions
+    local current_width = math.floor(ImageDataSize.Width * CurrentScale)
+    local current_height = math.floor(ImageDataSize.Height * CurrentScale)
+    Slab.Text("Size: (" .. current_width .. "x" .. current_height .. ")")
+    Slab.Text("Scale: " .. string.format("%.5f", CurrentScale)) -- Debug: show exact scale
+
+    -- Input for target width in pixels
+    local target_width = ImageDataSize.Width * CurrentScale
+    if Slab.Input('TargetWidth', {
+        W = ToolbarElementWidth * 1.5, -- Increase width (e.g., 1.5x) for finer mouse control
+        Text = tostring(math.floor(target_width)),
+        NumbersOnly = true,
+        MinNumber = 1,
+        MaxNumber = ImageDataSize.Width,
+        Precision = 0, -- Integer pixels
+        UseSlider = true,
+        Step = 1 -- Try to enforce 1px steps
+    }) then
+        local new_target_width = Slab.GetInputNumber()
+        if new_target_width and new_target_width >= 1 then
+            CurrentScale = new_target_width / ImageDataSize.Width
+            CurrentScale = math.max(0.01, math.min(1.0, CurrentScale))
             ParameterChanged = true
+            print("Slider/Text: New width = " .. new_target_width .. ", Scale = " .. CurrentScale)
         end
     end
 
-    Slab.Separator({H = 20})
+    -- Fine-tune buttons for ±1px adjustments
+    Slab.BeginLayout("FineTuneLayout", {AlignX = "center"})
+    if Slab.Button("-1px") then
+        local new_target_width = math.floor(ImageDataSize.Width * CurrentScale) - 1
+        if new_target_width >= 1 then
+            CurrentScale = new_target_width / ImageDataSize.Width
+            CurrentScale = math.max(0.01, math.min(1.0, CurrentScale))
+            ParameterChanged = true
+            print("Button -1px: New width = " .. new_target_width .. ", Scale = " .. CurrentScale)
+        end
+    end
+    Slab.SameLine()
+    if Slab.Button("+1px") then
+        local new_target_width = math.floor(ImageDataSize.Width * CurrentScale) + 1
+        if new_target_width <= ImageDataSize.Width then
+            CurrentScale = new_target_width / ImageDataSize.Width
+            CurrentScale = math.max(0.01, math.min(1.0, CurrentScale))
+            ParameterChanged = true
+            print("Button +1px: New width = " .. new_target_width .. ", Scale = " .. CurrentScale)
+        end
+    end
+    Slab.EndLayout()
+end
+
+
+
+    Slab.Separator({H = 65})
 
     if Slab.CheckBox(SplitChannelEnabled, "Split Channels") then
         SplitChannelEnabled = not SplitChannelEnabled
@@ -464,8 +516,8 @@ function CopyFile(source, destination)
 
     if Os == "Windows" then
         copyString = [[copy "]] .. source .. [[" "]] .. destination
-        copyString = string.gsub(copyString, [[/]], [[\]]) -- Converts paths to backslash for Windows.
-    else
+        copyString = string.gsub(copyString, [[/]], [[\]]) -- Converts paths to backslash for Windows. I think Mac and Linux use forward slash.
+    elseif Os== "Linux" then
         copyString = [[cp "]] .. source .. [[" "]] .. destination
     end
 
@@ -495,13 +547,7 @@ function love.directorydropped(path)
         ImageList = {}
         for i = 1 , #files do
             if files[i].type == "file" then
-                local imagePath = path
-                if Os == "Windows" then
-                    imagePath = imagePath .. '\\'
-                    else
-                    imagePath = imagePath .. '/'
-                end
-                imagePath = imagePath .. files[i].name
+                local imagePath = path .. '\\' .. files[i].name
                 if imagePath and (string.lower(string.sub(imagePath, #imagePath - 3, #imagePath)) == '.png' or string.lower(string.sub(imagePath, #imagePath - 3, #imagePath)) == '.jpg' or string.lower(string.sub(imagePath, #imagePath - 4, #imagePath)) == '.jpeg') then
                     print('Loaded ' .. imagePath)
                     ImageList[#ImageList + 1] = imagePath
@@ -639,12 +685,8 @@ function SplitChannel()
         love.filesystem.getSource() .. [[/cache/input.bin" -channel rgb -fx ]] ..
         channelString .. [[ "]] ..
         love.filesystem.getSource() .. [[/cache/grayscale.png"]]
-    elseif Os == "OS X" then
-        cmdString = [[magick "]] ..
-        love.filesystem.getSource() .. [[/cache/input.bin" -channel rgb -fx ]] ..
-        channelString .. [[ "]] ..
-        love.filesystem.getSource() .. [[/cache/grayscale.png"]]
     end
+
 
     print("\n" .. cmdString .. "\n")
     io.popen(cmdString):close()
@@ -715,17 +757,9 @@ function DitherImage()
         [[ --contrast ]] .. DitherParameters.Contrast ..
         ditherString
 
-    elseif Os == "OS X" then
-
-        cmdString = [[didder ]] .. scaleString .. [[ --palette "black white" -i ]] ..
-        inputString .. [[ -o "]] ..
-        love.filesystem.getSource() .. [[/cache/temp.png"]] ..
-        [[ --strength ]] .. DitherParameters.Strength ..
-        [[ --brightness ]] .. DitherParameters.Brightness ..
-        [[ --contrast ]] .. DitherParameters.Contrast ..
-        ditherString
-    
     end
+
+
 
     print("\n" .. cmdString .. "\n")
     io.popen(cmdString):close()
